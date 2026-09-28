@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ubicación exacta de la incidencia</title>
+<style>
+:root { font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
+* { box-sizing:border-box; }
+body { margin:0; background:#f4f6f8; color:#17202a; }
+header { padding:16px 20px; background:white; border-bottom:1px solid #dfe5ea; }
+h1 { font-size:20px; margin:0 0 5px; }
+header p { margin:0; color:#52606d; font-size:14px; }
+main { max-width:1500px; margin:auto; padding:14px; }
+.toolbar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; align-items:center; }
+button {
+  border:1px solid #aeb8c2; background:white; border-radius:8px;
+  padding:9px 13px; cursor:pointer; font-weight:600;
+}
+button:hover { background:#eef2f5; }
+#viewport {
+  position:relative; width:100%; height:min(72vh,900px);
+  overflow:hidden; background:#dfe3e6; border:1px solid #cbd3da;
+  border-radius:10px; touch-action:none; cursor:crosshair;
+}
+#stage { position:absolute; left:0; top:0; transform-origin:0 0; }
+#plan { display:block; max-width:none; user-select:none; -webkit-user-drag:none; }
+#marker {
+  display:none; position:absolute; width:30px; height:30px;
+  transform:translate(-50%,-50%); pointer-events:none;
+}
+#marker:before,#marker:after {
+  content:""; position:absolute; left:14px; top:0; width:3px; height:30px;
+  background:#d40000; border-radius:2px; box-shadow:0 0 2px white;
+}
+#marker:before { transform:rotate(45deg); }
+#marker:after { transform:rotate(-45deg); }
+.panel {
+  margin-top:10px; background:white; border:1px solid #dfe5ea;
+  border-radius:10px; padding:12px;
+}
+.code {
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  font-size:17px; font-weight:700; overflow-wrap:anywhere;
+}
+.small { color:#52606d; font-size:13px; margin-top:5px; }
+#status { margin-left:4px; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ubicación exacta de la incidencia</h1>
+  <p>Amplíe el plano si es necesario y haga clic exactamente en el punto donde se produjo o percibió la incidencia.</p>
+</header>
+<main>
+  <div class="toolbar">
+    <button id="zoomIn">＋ Ampliar</button>
+    <button id="zoomOut">－ Reducir</button>
+    <button id="reset">Ajustar plano</button>
+    <button id="clear">Borrar X</button>
+    <span id="status"></span>
+  </div>
+
+  <div id="viewport">
+    <div id="stage">
+      <img id="plan" src="plano_laboratorio.png" alt="Plano del laboratorio" draggable="false">
+      <div id="marker" aria-hidden="true"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div><strong>Código para Microsoft Forms</strong></div>
+    <div id="code" class="code">Marque primero un punto en el plano.</div>
+    <div id="coords" class="small"></div>
+    <div style="margin-top:10px">
+      <button id="copy" disabled>Copiar ubicación</button>
+      <span id="copyMsg" class="small"></span>
+    </div>
+    <div class="small">El código utiliza coordenadas porcentuales del plano, por lo que conserva la ubicación aunque cambie el tamaño de pantalla.</div>
+  </div>
+</main>
+
+<script>
+const viewport = document.getElementById('viewport');
+const stage = document.getElementById('stage');
+const plan = document.getElementById('plan');
+const marker = document.getElementById('marker');
+const codeEl = document.getElementById('code');
+const coordsEl = document.getElementById('coords');
+const copyBtn = document.getElementById('copy');
+const copyMsg = document.getElementById('copyMsg');
+const status = document.getElementById('status');
+
+let scale=1, tx=0, ty=0, selected=null;
+let dragging=false, moved=false, sx=0, sy=0, stx=0, sty=0;
+
+function apply(){ stage.style.transform=`translate(${tx}px,${ty}px) scale(${scale})`; status.textContent=`Zoom ${Math.round(scale*100)} %`; }
+function fit(){
+  const s=Math.min(viewport.clientWidth/plan.naturalWidth, viewport.clientHeight/plan.naturalHeight);
+  scale=s; tx=(viewport.clientWidth-plan.naturalWidth*s)/2; ty=(viewport.clientHeight-plan.naturalHeight*s)/2; apply();
+}
+function zoomAt(factor,cx,cy){
+  const old=scale, next=Math.max(0.2,Math.min(5,scale*factor));
+  const px=(cx-tx)/old, py=(cy-ty)/old;
+  scale=next; tx=cx-px*scale; ty=cy-py*scale; apply();
+}
+function setPoint(clientX,clientY){
+  const r=viewport.getBoundingClientRect();
+  const x=(clientX-r.left-tx)/scale, y=(clientY-r.top-ty)/scale;
+  if(x<0||y<0||x>plan.naturalWidth||y>plan.naturalHeight) return;
+  const xp=x/plan.naturalWidth*100, yp=y/plan.naturalHeight*100;
+  selected={x,y,xp,yp};
+  marker.style.left=x+'px'; marker.style.top=y+'px'; marker.style.display='block';
+  const xi=Math.round(xp*100), yi=Math.round(yp*100);
+  const code=`LABCLINICO-X${String(xi).padStart(4,'0')}-Y${String(yi).padStart(4,'0')}`;
+  codeEl.textContent=code;
+  coordsEl.textContent=`Coordenadas: X ${xp.toFixed(2)} % · Y ${yp.toFixed(2)} %`;
+  copyBtn.disabled=false; copyMsg.textContent='';
+}
+plan.addEventListener('load',fit);
+window.addEventListener('resize',()=>{ if(!selected) fit(); });
+
+viewport.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const r=viewport.getBoundingClientRect();
+  zoomAt(e.deltaY<0?1.15:1/1.15,e.clientX-r.left,e.clientY-r.top);
+},{passive:false});
+
+viewport.addEventListener('pointerdown',e=>{
+  dragging=true; moved=false; sx=e.clientX; sy=e.clientY; stx=tx; sty=ty;
+  viewport.setPointerCapture(e.pointerId);
+});
+viewport.addEventListener('pointermove',e=>{
+  if(!dragging) return;
+  const dx=e.clientX-sx, dy=e.clientY-sy;
+  if(Math.hypot(dx,dy)>5){ moved=true; tx=stx+dx; ty=sty+dy; apply(); }
+});
+viewport.addEventListener('pointerup',e=>{
+  if(!dragging) return;
+  dragging=false;
+  if(!moved) setPoint(e.clientX,e.clientY);
+});
+document.getElementById('zoomIn').onclick=()=>zoomAt(1.2,viewport.clientWidth/2,viewport.clientHeight/2);
+document.getElementById('zoomOut').onclick=()=>zoomAt(1/1.2,viewport.clientWidth/2,viewport.clientHeight/2);
+document.getElementById('reset').onclick=fit;
+document.getElementById('clear').onclick=()=>{
+  selected=null; marker.style.display='none'; codeEl.textContent='Marque primero un punto en el plano.';
+  coordsEl.textContent=''; copyBtn.disabled=true; copyMsg.textContent='';
+};
+copyBtn.onclick=async()=>{
+  try { await navigator.clipboard.writeText(codeEl.textContent); copyMsg.textContent=' ✓ Copiado. Péguelo en la pregunta de Forms.'; }
+  catch { copyMsg.textContent=' Seleccione el código y cópielo manualmente.'; }
+};
+</script>
+</body>
+</html>
